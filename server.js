@@ -162,10 +162,16 @@ app.get('/notes/:id', async (req, res) => {
 });
 
 async function start() {
+const socketActivation = process.env.LISTEN_FDS > 0;
+const listenConfig = socketActivation ? { fd: 3 } : PORT;
     try {
         await runMigrations(dbConfig);
-        app.listen(PORT, '127.0.0.1', () => {
+        app.listen(listenConfig, () => {
+        if(socketActivation) {
+            console.log(`Server running with systemd socket activation`);
+        } else {
             console.log(`Server running on http://127.0.0.1:${PORT}`);
+        }
         });
     } catch (err) {
         console.error("Failed to start application:", err);
