@@ -107,4 +107,12 @@ sudo mkdir -p /home/student
 echo "10" | sudo tee /home/student/gradebook > /dev/null
 sudo chown student:student /home/student/gradebook
 
+echo "9. Блокування дефолтного користувача"
+DEFAULT_USER=$SUDO_USER
+
+if [ -n "$DEFAULT_USER" ] && [ "$DEFAULT_USER" != "root" ]; then
+    sudo passwd -l "$DEFAULT_USER"
+else
+    echo "Дефолтного користувача не знайдено або скрипт запущено не через sudo."
+fi
 echo "✅ Автоматичне розгортання завершено успішно!"
