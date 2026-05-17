@@ -5,14 +5,34 @@ sudo apt update
 sudo apt install -y mariadb-server nginx curl git gnupg nodejs npm
 
 echo " 2. Створення користувачів та налаштування прав "
-id -u student &>/dev/null || sudo useradd -m -s /bin/bash student
-id -u teacher &>/dev/null || sudo useradd -m -s /bin/bash teacher
-id -u app &>/dev/null || sudo useradd -r -s /bin/false app
-id -u operator &>/dev/null || sudo useradd -m -s /bin/bash operator
 
-echo "student:12345678" | sudo chpasswd
-echo "teacher:12345678" | sudo chpasswd
-echo "operator:12345678" | sudo chpasswd
+if id "student" &>/dev/null; then
+    sudo userdel -r student
+fi
+
+if id "teacher" &>/dev/null; then
+    sudo userdel -r teacher
+fi
+
+if id "operator" &>/dev/null; then
+    sudo userdel -r operator
+fi
+if getent group operator &>/dev/null; then
+    sudo groupdel operator
+fi
+
+if id "app" &>/dev/null; then
+    sudo userdel app
+fi
+
+sudo useradd -m -s /bin/bash student
+sudo useradd -m -s /bin/bash teacher
+sudo useradd -r -s /bin/false app
+sudo groupadd operator || true
+sudo useradd -m -g operator -s /bin/bash operator
+echo "student:BlaBleBla!10" | sudo chpasswd
+echo "teacher:BlaBleBla!10" | sudo chpasswd
+echo "operator:BlaBleBla!10" | sudo chpasswd
 
 sudo usermod -aG sudo student
 sudo usermod -aG sudo teacher
@@ -63,7 +83,8 @@ echo " 5. Налаштування папки веб-додатку "
 sudo mkdir -p /opt/mywebapp
 sudo cp -rf . /opt/mywebapp/
 cd /opt/mywebapp
-sudo npm install --omit=dev
+sudo chown -R app:app /opt/mywebapp
+sudo npm install --omit=dev --unsafe-perm
 sudo chown -R app:app /opt/mywebapp
 
 echo " 6. Запуск сервісів Systemd "
