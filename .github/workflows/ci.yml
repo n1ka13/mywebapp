@@ -1,4 +1,4 @@
-name: CI Pipeline
+name: CI/CD Pipeline
 
 "on":
   push:
@@ -60,19 +60,66 @@ jobs:
           name: code-coverage-report
           path: coverage/
 
-  build:
-    name: Build Docker Image
+  build-and-push:
+    name: Build & Push Image
     needs: [lint, test]
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Docker Image
+      - name: Build and Push to GHCR
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: false
+          push: true
+          tags: ghcr.io/${{ github.repository }}:latest
+
+  deploy:
+    name: Deploy & Verify to VM2
+    needs: build-and-push
+    runs-on: self-hosted
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.TARGET_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Copy Config Files to VM2
+        run: |
+          ssh ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "sudo mkdir -p /opt/mywebapp && sudo chown -R \$USER:\$USER /opt/mywebapp"
+          scp docker-compose.yml nginx.conf ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:/opt/mywebapp/
+
+      - name: Pull New Image and Restart via Systemd
+        run: |
+          ssh ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
+            echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+            sudo docker compose -f /opt/mywebapp/docker-compose.yml pull
+            sudo systemctl restart mywebapp.service
+          "
+
+      - name: Verify Deployment (Automated Healthcheck)
+        run: |
+          echo "Очікуємо 10 секунд для ініціалізації контейнерів..."
+          sleep 10
+          echo "Перевірка liveness probe сервісу..."
+          STATUS=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.TARGET_HOST }}/health/alive)
+          if [ "$STATUS" -ne 200 ]; then
+            echo "Помилка верифікації! Застосунок повернув HTTP код $STATUS"
+            exit 1
+          fi
+          echo "Розгортання успішно верифіковано! HTTP статус: 200 OK"
