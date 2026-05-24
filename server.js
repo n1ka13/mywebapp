@@ -5,21 +5,17 @@ const { runMigrations } = require('./migrations');
 
 const args = parseArgs(process.argv.slice(2), {
     default: {
-        port: 8080,
-        'db-host': '127.0.0.1',
-        'db-user': 'webapp_user',
-        'db-pass': 'password',
-        'db-name': 'mywebapp_db'
+        port: 8080
     }
 });
 
-const PORT = args.port;
 const dbConfig = {
-    host: args['db-host'],
-    user: args['db-user'],
-    password: args['db-pass'],
-    database: args['db-name']
+    host: process.env.DB_HOST || args['db-host'] || '127.0.0.1',
+    user: process.env.DB_USER || args['db-user'] || 'webapp_user',
+    password: process.env.DB_PASSWORD || args['db-pass'] || 'password',
+    database: process.env.DB_NAME || args['db-name'] || 'mywebapp_db'
 };
+const PORT = process.env.PORT || args.port;
 
 const app = express();
 app.use(express.json());
