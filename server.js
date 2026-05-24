@@ -175,4 +175,8 @@ const listenConfig = socketActivation ? { fd: 3 } : PORT;
     }
 }
 
-start();
+if (require.main === module) {
+    start();
+}
+
+module.exports = { app, pool };
