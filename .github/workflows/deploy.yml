@@ -5,7 +5,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy & Verify to VM2 (With Auto-Install)
+    name: Deploy & Verify to VM2
     runs-on: self-hosted
     env:
       SSH_OPTS: "-o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes -i ~/.ssh/id_rsa"
@@ -16,22 +16,15 @@ jobs:
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-      - name: Deploy via SSH (Install & Pull)
+      - name: Deploy via SSH
         run: |
           export SSH_AUTH_SOCK=""
 
           ssh $SSH_OPTS ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
-            if ! command -v docker compose &> /dev/null; then
-              sudo apt-get update -y &&
-              sudo apt-get install -y docker-compose-plugin
-            fi
-
-            docker compose version
-
-            echo '${{ secrets.GITHUB_TOKEN }}' | sudo docker login ghcr.io -u '${{ github.actor }}' --password-stdin &&
             cd /opt/mywebapp &&
+            echo '${{ secrets.GITHUB_TOKEN }}' | sudo docker login ghcr.io -u '${{ github.actor }}' --password-stdin &&
             sudo docker compose pull &&
-            sudo docker compose up -d --force-recreate
+            sudo systemctl restart mywebapp.service
           "
 
       - name: Verify deployment
@@ -45,25 +38,20 @@ jobs:
             for i in {1..30}; do
               STATUS_MAIN=\$(curl -o /dev/null -s -w '%{http_code}' http://localhost:8080/)
 
-              if [ \"\$STATUS_MAIN\" -eq 200 ]; then
-                echo 'Головна сторінка доступна (200 OK)!'
+              STATUS_HEALTH=\$(curl -o /dev/null -s -w '%{http_code}' http://localhost:8080/health/alive)
 
-                STATUS_HEALTH=\$(curl -o /dev/null -s -w '%{http_code}' http://localhost:8080/health/alive)
-                if [ \"\$STATUS_HEALTH\" -ne 403 ]; then
-                  echo 'Помилка безпеки! Доступ до /health/alive не заблоковано. Код: '\$STATUS_HEALTH
-                  exit 1
-                fi
-
-                echo 'Розгортання успішно верифіковано!'
+              if [ \"\$STATUS_MAIN\" -eq 200 ] && [ \"\$STATUS_HEALTH\" -eq 403 ]; then
+                echo \"App is ready and security checks passed (Main: 200, Health: 403)\"
                 exit 0
               fi
 
-              echo 'Очікування готовності застосунку... спроба \$i/30'
+              echo \"Waiting for app... attempt \$i/30 (Main: \$STATUS_MAIN, Health: \$STATUS_HEALTH)\"
               sleep 5
             done
 
-            echo 'Помилка! Застосунок не запустився.'
+            echo \"App failed health check\"
             sudo docker compose ps
-            sudo docker compose logs web --tail=50
+            sudo docker compose logs web --tail=100
+            sudo docker compose logs nginx --tail=100
             exit 1
           "
