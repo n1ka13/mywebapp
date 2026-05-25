@@ -1,8 +1,12 @@
-deploy:
-    name: Deploy & Verify to VM2 (Pure Pull Method)
-    needs: build-and-push
+name: Deploy to Target Node
+
+on:
+  workflow_call:
+
+jobs:
+  deploy:
+    name: Deploy & Verify to VM2 (With Auto-Install)
     runs-on: self-hosted
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     env:
       SSH_OPTS: "-o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes -i ~/.ssh/id_rsa"
     steps:
@@ -12,21 +16,28 @@ deploy:
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-      - name: Deploy via SSH (Pull & Restart)
+      - name: Deploy via SSH (Install & Pull)
         run: |
           export SSH_AUTH_SOCK=""
-          
+
           ssh $SSH_OPTS ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
+            if ! command -v docker compose &> /dev/null; then
+              sudo apt-get update -y &&
+              sudo apt-get install -y docker-compose-plugin
+            fi
+
+            docker compose version
+
             echo '${{ secrets.GITHUB_TOKEN }}' | sudo docker login ghcr.io -u '${{ github.actor }}' --password-stdin &&
             cd /opt/mywebapp &&
             sudo docker compose pull &&
             sudo docker compose up -d --force-recreate
           "
 
-      - name: Verify deployment (Smart Loop)
+      - name: Verify deployment
         run: |
           export SSH_AUTH_SOCK=""
-          
+
           ssh $SSH_OPTS ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
             set -e
             cd /opt/mywebapp
@@ -39,11 +50,11 @@ deploy:
 
                 STATUS_HEALTH=\$(curl -o /dev/null -s -w '%{http_code}' http://localhost:8080/health/alive)
                 if [ \"\$STATUS_HEALTH\" -ne 403 ]; then
-                  echo 'Помилка безпеки. Доступ до /health/alive не заблоковано. Код: '\$STATUS_HEALTH
+                  echo 'Помилка безпеки! Доступ до /health/alive не заблоковано. Код: '\$STATUS_HEALTH
                   exit 1
                 fi
 
-                echo 'Розгортання успішно верифіковано'
+                echo 'Розгортання успішно верифіковано!'
                 exit 0
               fi
 
@@ -51,9 +62,8 @@ deploy:
               sleep 5
             done
 
-            echo 'Помилка! Застосунок не пройшов перевірку'
+            echo 'Помилка! Застосунок не запустився.'
             sudo docker compose ps
             sudo docker compose logs web --tail=50
-            sudo docker compose logs nginx --tail=50
             exit 1
           "
