@@ -114,21 +114,16 @@ jobs:
       - name: Verify Deployment (Automated Healthcheck)
         run: |
           sleep 10
-          
           STATUS_MAIN=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.TARGET_HOST }}/)
           echo "Публічний статус головної сторінки: $STATUS_MAIN"
-          
           if [ "$STATUS_MAIN" -ne 200 ]; then
             echo "Помилка! Головна сторінка застосунку недоступна."
             exit 1
           fi
-
           STATUS_HEALTH=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.TARGET_HOST }}/health/alive)
           echo "Зовнішній статус технічного ендпоінту: $STATUS_HEALTH"
-          
           if [ "$STATUS_HEALTH" -ne 403 ]; then
             echo "Помилка безпеки! Доступ до /health/alive ззовні не заблоковано (очікувався код 403, отримано $STATUS_HEALTH)."
             exit 1
           fi
-
           echo "Розгортання успішно верифіковано згідно варіанту 10"
