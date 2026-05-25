@@ -5,70 +5,68 @@ on:
 
 jobs:
   deploy:
-    name: Deploy & Verify to VM2
+    name: Deploy & Verify to VM2 (Pure Native)
     runs-on: self-hosted
     env:
       SSH_OPTS: "-o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes -i ~/.ssh/id_rsa"
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Configure SSH Key
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-      - name: Provision Target Node (Auto-Environment Setup)
+      - name: Prepare VM2 & Deploy
         run: |
           export SSH_AUTH_SOCK=""
+          HOST="${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}"
 
-          ssh $SSH_OPTS ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
-            if ! systemctl list-unit-files | grep -q mywebapp.service; then
-              echo 'Службу не знайдено налаштовуємо ОС та середовище...'
+          CURRENT_TIME=$(date +"%Y-%m-%d %H:%M:%S")
 
-              sudo bash -c 'cat << \"EOF\" > /tmp/setup-target.sh
-              $(cat scripts/setup-target.sh)
-          EOF'
-              sudo bash /tmp/setup-target.sh
-              rm -f /tmp/setup-target.sh
-            else
-              echo 'Середовище вже налаштоване, служба Systemd активна.'
-            fi
-          "
+          scp $SSH_OPTS docker-compose.yml nginx.conf scripts/setup-target.sh $HOST:/tmp/
 
-      - name: Deploy via SSH (Systemd Control)
-        run: |
-          export SSH_AUTH_SOCK=""
+          ssh $SSH_OPTS $HOST "
+            set -e
 
-          ssh $SSH_OPTS ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
-            cd /opt/mywebapp &&
-            echo '${{ secrets.GITHUB_TOKEN }}' | sudo docker login ghcr.io -u '${{ github.actor }}' --password-stdin &&
-            sudo docker compose pull &&
+            sudo date -s \"$CURRENT_TIME\"
+            sudo timedatectl set-ntp false || true
+            sleep 2
+
+            chmod +x /tmp/setup-target.sh
+            sudo /tmp/setup-target.sh
+
+            sudo ufw disable || true
+
+            sudo mv /tmp/docker-compose.yml /tmp/nginx.conf /opt/mywebapp/
+
+            cd /opt/mywebapp
+            echo '${{ secrets.GITHUB_TOKEN }}' | sudo docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+            sudo docker compose pull
             sudo systemctl restart mywebapp.service
+
+            sleep 3
+            sudo docker compose ps
           "
 
       - name: Verify deployment
         run: |
-          export SSH_AUTH_SOCK=""
+          TARGET_IP="${{ secrets.TARGET_HOST }}"
 
-          ssh $SSH_OPTS ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
-            set -e
-            cd /opt/mywebapp
+          for i in {1..30}; do
+            STATUS_MAIN=$(curl -o /dev/null -s -w '%{http_code}' http://$TARGET_IP:8080/)
+            STATUS_HEALTH=$(curl -o /dev/null -s -w '%{http_code}' http://$TARGET_IP:8080/health/alive)
 
-            for i in {1..30}; do
-              STATUS_MAIN=\$(curl -o /dev/null -s -w '%{http_code}' http://localhost:8080/)
-              STATUS_HEALTH=\$(curl -o /dev/null -s -w '%{http_code}' http://localhost:8080/health/alive)
+            if [ "$STATUS_MAIN" -eq 200 ] && [ "$STATUS_HEALTH" -eq 403 ]; then
+              echo "App is ready (200 OK) and health is blocked (403 Forbidden)"
+              exit 0
+            fi
 
-              if [ \"\$STATUS_MAIN\" -eq 200 ] && [ \"\$STATUS_HEALTH\" -eq 403 ]; then
-                echo \"App is ready and security checks passed (Main: 200, Health: 403)\"
-                exit 0
-              fi
+            echo "Очікування запуску... спроба $i/30"
+            sleep 5
+          done
 
-              echo \"Waiting for app... attempt \$i/30 (Main: \$STATUS_MAIN, Health: \$STATUS_HEALTH)\"
-              sleep 5
-            done
-
-            echo \"App failed health check\"
-            sudo docker compose ps
-            sudo docker compose logs web --tail=100
-            sudo docker compose logs nginx --tail=100
-            exit 1
-          "
+          echo "Помилка верифікації!"
+          exit 1
