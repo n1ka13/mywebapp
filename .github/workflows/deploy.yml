@@ -16,7 +16,25 @@ jobs:
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
-      - name: Deploy via SSH
+      - name: Provision Target Node (Auto-Environment Setup)
+        run: |
+          export SSH_AUTH_SOCK=""
+
+          ssh $SSH_OPTS ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
+            if ! systemctl list-unit-files | grep -q mywebapp.service; then
+              echo 'Службу не знайдено налаштовуємо ОС та середовище...'
+
+              sudo bash -c 'cat << \"EOF\" > /tmp/setup-target.sh
+              $(cat scripts/setup-target.sh)
+          EOF'
+              sudo bash /tmp/setup-target.sh
+              rm -f /tmp/setup-target.sh
+            else
+              echo 'Середовище вже налаштоване, служба Systemd активна.'
+            fi
+          "
+
+      - name: Deploy via SSH (Systemd Control)
         run: |
           export SSH_AUTH_SOCK=""
 
@@ -37,7 +55,6 @@ jobs:
 
             for i in {1..30}; do
               STATUS_MAIN=\$(curl -o /dev/null -s -w '%{http_code}' http://localhost:8080/)
-
               STATUS_HEALTH=\$(curl -o /dev/null -s -w '%{http_code}' http://localhost:8080/health/alive)
 
               if [ \"\$STATUS_MAIN\" -eq 200 ] && [ \"\$STATUS_HEALTH\" -eq 403 ]; then
