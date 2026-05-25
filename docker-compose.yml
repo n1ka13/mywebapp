@@ -32,7 +32,7 @@ services:
       DB_USER: webuser
       DB_PASSWORD: webpassword
       DB_NAME: mydatabase
-      PORT: 3000
+      PORT: 8080
 
     depends_on:
       database:
