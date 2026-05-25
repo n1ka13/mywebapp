@@ -95,31 +95,40 @@ jobs:
       - name: Configure SSH Key
         run: |
           mkdir -p "$HOME/.ssh"
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H ${{ secrets.TARGET_HOST }} >> ~/.ssh/known_hosts
 
       - name: Copy Config Files to VM2
         run: |
-          ssh -o StrictHostKeyChecking=no -o PubkeyAcceptedKeyTypes=+ssh-ed25519 -i ~/.ssh/id_ed25519 ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "sudo mkdir -p /opt/mywebapp && sudo chown -R \$USER:\$USER /opt/mywebapp"
-          scp -o StrictHostKeyChecking=no -o PubkeyAcceptedKeyTypes=+ssh-ed25519 -i ~/.ssh/id_ed25519 docker-compose.yml nginx.conf ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:/opt/mywebapp/
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "sudo mkdir -p /opt/mywebapp && sudo chown -R \$USER:\$USER /opt/mywebapp"
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa docker-compose.yml nginx.conf ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:/opt/mywebapp/
 
       - name: Pull New Image and Restart via Systemd
         run: |
-          ssh -o StrictHostKeyChecking=no -o PubkeyAcceptedKeyTypes=+ssh-ed25519 -i ~/.ssh/id_ed25519 ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
-            echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
             sudo docker compose -f /opt/mywebapp/docker-compose.yml pull
             sudo systemctl restart mywebapp.service
           "
 
       - name: Verify Deployment (Automated Healthcheck)
         run: |
-          echo "10 секунд для ініціалізації контейнерів"
           sleep 10
-          echo "Перевірка liveness probe..."
-          STATUS=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.TARGET_HOST }}/health/alive)
-          if [ "$STATUS" -ne 200 ]; then
-            echo "Помилка верифікації! Застосунок повернув HTTP код $STATUS"
+          
+          STATUS_MAIN=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.TARGET_HOST }}/)
+          echo "Публічний статус головної сторінки: $STATUS_MAIN"
+          
+          if [ "$STATUS_MAIN" -ne 200 ]; then
+            echo "Помилка! Головна сторінка застосунку недоступна."
             exit 1
           fi
-          echo "Розгортання успішно верифіковано! HTTP статус: 200 OK"
+
+          STATUS_HEALTH=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.TARGET_HOST }}/health/alive)
+          echo "Зовнішній статус технічного ендпоінту: $STATUS_HEALTH"
+          
+          if [ "$STATUS_HEALTH" -ne 403 ]; then
+            echo "Помилка безпеки! Доступ до /health/alive ззовні не заблоковано (очікувався код 403, отримано $STATUS_HEALTH)."
+            exit 1
+          fi
+
+          echo "Розгортання успішно верифіковано згідно варіанту 10"
