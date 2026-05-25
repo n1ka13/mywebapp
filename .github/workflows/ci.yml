@@ -107,8 +107,17 @@ jobs:
 
       - name: Copy Config Files to VM2
         run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "sudo mkdir -p /opt/mywebapp && sudo chown -R \$USER:\$USER /opt/mywebapp"
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "sudo mkdir -p /opt/mywebapp && sudo chown -R ${{ secrets.TARGET_USER }}:${{ secrets.TARGET_USER }} /opt/mywebapp"
           scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa docker-compose.yml nginx.conf ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:/opt/mywebapp/
+
+      - name: Login to GHCR on VM
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa \
+          ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
+            echo '${{ secrets.GITHUB_TOKEN }}' | sudo docker login ghcr.io \
+            -u '${{ github.actor }}' \
+            --password-stdin
+          "
 
       - name: Pull New Image and Restart via Docker Compose
         run: |
