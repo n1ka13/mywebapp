@@ -69,19 +69,25 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
-      - name: Build and Push to GHCR
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build and Push to GHCR via Buildx CLI
+        run: |
+          IMAGE="ghcr.io/${{ github.repository }}"
+          SHA="${{ github.sha }}"
+
+          docker buildx build \
+            -f ./Dockerfile \
+            -t $IMAGE:latest \
+            -t $IMAGE:sha-$SHA \
+            --push .
 
   deploy:
     name: Deploy & Verify to VM2
@@ -104,26 +110,30 @@ jobs:
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "sudo mkdir -p /opt/mywebapp && sudo chown -R \$USER:\$USER /opt/mywebapp"
           scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa docker-compose.yml nginx.conf ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:/opt/mywebapp/
 
-      - name: Pull New Image and Restart via Systemd
+      - name: Pull New Image and Restart via Docker Compose
         run: |
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
             sudo docker compose -f /opt/mywebapp/docker-compose.yml pull
-            sudo systemctl restart mywebapp.service
+            sudo docker compose -f /opt/mywebapp/docker-compose.yml up -d --force-recreate
           "
 
       - name: Verify Deployment (Automated Healthcheck)
         run: |
-          sleep 10
+          sleep 15
+
           STATUS_MAIN=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.TARGET_HOST }}/)
           echo "Публічний статус головної сторінки: $STATUS_MAIN"
           if [ "$STATUS_MAIN" -ne 200 ]; then
             echo "Помилка! Головна сторінка застосунку недоступна."
             exit 1
           fi
+
           STATUS_HEALTH=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.TARGET_HOST }}/health/alive)
           echo "Зовнішній статус технічного ендпоінту: $STATUS_HEALTH"
+
           if [ "$STATUS_HEALTH" -ne 403 ]; then
             echo "Помилка безпеки! Доступ до /health/alive ззовні не заблоковано (очікувався код 403, отримано $STATUS_HEALTH)."
             exit 1
           fi
+
           echo "Розгортання успішно верифіковано згідно варіанту 10"
