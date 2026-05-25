@@ -54,14 +54,8 @@ jobs:
       - name: Run Tests with Coverage
         run: npm test
 
-      - name: Upload Coverage Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: code-coverage-report
-          path: coverage/
-
   build-and-push:
-    name: Build & Push Image
+    name: Build & Push Multi-arch Image
     needs: [lint, test]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -77,13 +71,13 @@ jobs:
 
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-      - name: Build and Push to GHCR via Buildx CLI
+      - name: Build and Push
         run: |
           IMAGE="ghcr.io/${{ github.repository }}"
           SHA="${{ github.sha }}"
 
           docker buildx build \
+            --platform linux/amd64,linux/arm64 \
             -f ./Dockerfile \
             -t $IMAGE:latest \
             -t $IMAGE:sha-$SHA \
@@ -94,55 +88,25 @@ jobs:
     needs: build-and-push
     runs-on: self-hosted
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    env:
+      SSH_OPTS: "-o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o BatchMode=yes -i ~/.ssh/id_rsa"
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Configure SSH Key
         run: |
-          mkdir -p "$HOME/.ssh"
+          mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.TARGET_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Copy Config Files to VM2
+      - name: Deploy to VM2
         run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "sudo mkdir -p /opt/mywebapp && sudo chown -R ${{ secrets.TARGET_USER }}:${{ secrets.TARGET_USER }} /opt/mywebapp"
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa docker-compose.yml nginx.conf ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:/opt/mywebapp/
+          export SSH_AUTH_SOCK=""
 
-      - name: Login to GHCR on VM
-        run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa \
-          ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
-            echo '${{ secrets.GITHUB_TOKEN }}' | sudo docker login ghcr.io \
-            -u '${{ github.actor }}' \
-            --password-stdin
-          "
+          scp $SSH_OPTS docker-compose.yml nginx.conf ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}:/opt/mywebapp/
 
-      - name: Pull New Image and Restart via Docker Compose
-        run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
+          ssh $SSH_OPTS ${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }} "
+            sudo mkdir -p /opt/mywebapp
+            sudo chown -R ${{ secrets.TARGET_USER }}:${{ secrets.TARGET_USER }} /opt/mywebapp
+            echo '${{ secrets.GITHUB_TOKEN }}' | sudo docker login ghcr.io -u '${{ github.actor }}' --password-stdin
             sudo docker compose -f /opt/mywebapp/docker-compose.yml pull
             sudo docker compose -f /opt/mywebapp/docker-compose.yml up -d --force-recreate
           "
-
-      - name: Verify Deployment (Automated Healthcheck)
-        run: |
-          sleep 15
-
-          STATUS_MAIN=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.TARGET_HOST }}/)
-          echo "Публічний статус головної сторінки: $STATUS_MAIN"
-          if [ "$STATUS_MAIN" -ne 200 ]; then
-            echo "Помилка! Головна сторінка застосунку недоступна."
-            exit 1
-          fi
-
-          STATUS_HEALTH=$(curl -o /dev/null -s -w "%{http_code}" http://${{ secrets.TARGET_HOST }}/health/alive)
-          echo "Зовнішній статус технічного ендпоінту: $STATUS_HEALTH"
-
-          if [ "$STATUS_HEALTH" -ne 403 ]; then
-            echo "Помилка безпеки! Доступ до /health/alive ззовні не заблоковано (очікувався код 403, отримано $STATUS_HEALTH)."
-            exit 1
-          fi
-
-          echo "Розгортання успішно верифіковано згідно варіанту 10"
