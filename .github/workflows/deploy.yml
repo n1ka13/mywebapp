@@ -35,11 +35,26 @@ jobs:
             sudo timedatectl set-ntp false || true
             sleep 2
 
+            sudo systemctl stop unattended-upgrades || true
+
+            for i in {1..12}; do
+              if ! sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; then
+                break
+              fi
+              sleep 5
+            done
+
+            sudo rm -f /var/lib/dpkg/lock-frontend
+            sudo rm -f /var/lib/apt/lists/lock
+            sudo rm -f /var/lib/dpkg/lock
+            sudo dpkg --configure -a
+
             chmod +x /tmp/setup-target.sh
             sudo /tmp/setup-target.sh
 
             sudo ufw disable || true
 
+            sudo mkdir -p /opt/mywebapp
             sudo mv /tmp/docker-compose.yml /tmp/nginx.conf /opt/mywebapp/
 
             cd /opt/mywebapp
