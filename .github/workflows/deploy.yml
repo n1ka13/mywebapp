@@ -19,21 +19,24 @@ jobs:
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
 
+      - name: Sync time on VM2
+        run: |
+          HOST="${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}"
+          CURRENT_TIME=$(date +"%Y-%m-%d %H:%M:%S")
+
+          ssh $SSH_OPTS $HOST "sudo timedatectl set-ntp false || true; sudo date -s \"$CURRENT_TIME\"" || true
+
+          sleep 5
+
       - name: Prepare VM2 & Deploy
         run: |
           export SSH_AUTH_SOCK=""
           HOST="${{ secrets.TARGET_USER }}@${{ secrets.TARGET_HOST }}"
 
-          CURRENT_TIME=$(date +"%Y-%m-%d %H:%M:%S")
-
           scp $SSH_OPTS docker-compose.yml nginx.conf scripts/setup-target.sh $HOST:/tmp/
 
           ssh $SSH_OPTS $HOST "
             set -e
-
-            sudo date -s \"$CURRENT_TIME\"
-            sudo timedatectl set-ntp false || true
-            sleep 2
 
             sudo systemctl stop unattended-upgrades || true
 
