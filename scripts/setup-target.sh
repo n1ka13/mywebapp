@@ -14,14 +14,6 @@ sudo usermod -aG docker "$USER"
 
 sudo apt-get install -y docker-compose-plugin
 
-if ! grep -q "HostKeyAlgorithms +\*" /etc/ssh/sshd_config; then
-    echo "HostKeyAlgorithms +*" | sudo tee -a /etc/ssh/sshd_config
-fi
-if ! grep -q "PubkeyAcceptedAlgorithms +\*" /etc/ssh/sshd_config; then
-    echo "PubkeyAcceptedAlgorithms +*" | sudo tee -a /etc/ssh/sshd_config
-fi
-sudo systemctl restart sshd
-
 sudo mkdir -p /opt/mywebapp
 sudo chown -R "$USER":"$USER" /opt/mywebapp
 
