@@ -82,8 +82,6 @@ app.get('/notes', async (req, res) => {
     try {
         conn = await pool.getConnection();
         const rows = await conn.query('SELECT id, title FROM notes');
-        
-        // Перевірка заголовка Accept
         const accept = req.headers['accept'] || '';
         if (accept.includes('text/html')) {
             const tableRows = rows.map(r => [r.id, r.title]);
@@ -166,7 +164,7 @@ const listenConfig = socketActivation ? { fd: 3 } : PORT;
         if(socketActivation) {
             console.log(`Server running with systemd socket activation`);
         } else {
-            console.log(`Server running on http://127.0.0.1:${PORT}`);
+            console.log(`Server running on http://127.0.0.1:${PORT}!`);
         }
         });
     } catch (err) {
