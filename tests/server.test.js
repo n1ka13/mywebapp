@@ -91,7 +91,7 @@ describe('Тестування HTTP Endpoints (My Web App)', () => {
     });
 
     test('POST /notes має успішно створювати нотатку та повертати 210 JSON', async () => {
-        mockConn.query.mockResolvedValue({ insertId: 42 });
+        //mockConn.query.mockResolvedValue({ insertId: 42 });
 
         const res = await request(app)
             .post('/notes')
